@@ -1,0 +1,28 @@
+name: Daily Bank Bonus Bot
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # প্রতিদিন বাংলাদেশ সময় দুপুর ১২টায় অটোমেটিক রান হবে
+  workflow_dispatch: # চাইলে আপনি নিজেও বাটন চেপে ইনস্ট্যান্ট রান করতে পারবেন
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+            python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests bs4 googletrans==4.0.0-rc1
+
+      - name: Run Scraper Script
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python script.py
