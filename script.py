@@ -1,5 +1,6 @@
 import os
 import requests
+import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 from googletrans import Translator
 from datetime import datetime
@@ -36,28 +37,27 @@ def translate_to_bangla(text):
 
 def scrape_doc():
     doc_results = []
-    # Doctor of Credit Bank Bonus RSS Feed
     url = "https://www.doctorofcredit.com/category/bank-account-bonuses/feed/"
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(res.content, 'xml')
-        items = soup.find_all('item')
+        # Built-in XML parsing (No extra library needed)
+        root = ET.fromstring(res.content)
         
         count = 0
-        for item in items:
-            title = item.find('title').get_text().strip() if item.find('title') else ""
-            link = item.find('link').get_text().strip() if item.find('link') else ""
-            pub_date = item.find('pubDate').get_text().strip() if item.find('pubDate') else ""
-            description = item.find('description').get_text().strip() if item.find('description') else ""
+        for item in root.findall('.//item'):
+            title = item.find('title').text.strip() if item.find('title') is not None else ""
+            link = item.find('link').text.strip() if item.find('link') is not None else ""
+            pub_date = item.find('pubDate').text.strip() if item.find('pubDate') is not None else ""
+            desc = item.find('description').text.strip() if item.find('description') is not None else ""
             
-            combined_text = (title + " " + description).lower()
+            combined_text = (title + " " + desc).lower()
             
-            # 1. Strict Expiry Filter
+            # 1. Expiry Check
             if any(exp in combined_text for exp in ['expired', 'expired deal', 'expired bonus', '[expired]']):
                 continue
                 
             # 2. Meta/General Page Title Filter
-            if any(meta in title.lower() for meta in ['best bank account bonuses', 'q1', 'q2', 'q3', 'q4', 'august 2026', 'july 2026']):
+            if any(meta in title.lower() for meta in ['best bank account bonuses', 'q1', 'q2', 'q3', 'q4', 'august 2026']):
                 continue
             
             # 3. No Deposit / Easy Requirement Filter
@@ -68,7 +68,7 @@ def scrape_doc():
                 bn_title = translate_to_bangla(title)
                 bn_date = translate_to_bangla(clean_date)
                 
-                doc_results.append(f"{count}. *{bn_title}*\n📅 তারিখ: {bn_date}\n🔗 [আর্টিকেল লিংক]({link})")
+                doc_results.append(f"{count}. *{bn_title}*\n📅 প্রকাশকাল: {bn_date}\n🔗 [আর্টিকেল লিংক]({link})")
                 if count >= 3:
                     break
     except Exception as e:
@@ -93,7 +93,7 @@ def scrape_bankbonus():
             if any(exp in title_lower for exp in ['expired', 'ended', 'closed']):
                 continue
                 
-            # 2. Filter specific bank deals (Must have $ amount and ignore generic section titles)
+            # 2. Filter specific bank deals (Must have $ amount and ignore generic headers)
             if '$' in title and not any(gen in title_lower for gen in ['best bank', 'promotions without', 'bonus offers for', 'best checking']):
                 link_tag = h.find('a')
                 link = link_tag['href'] if link_tag and link_tag.has_attr('href') else url
