@@ -18,7 +18,12 @@ def send_telegram_msg(message):
         print("Telegram Token or Chat ID is missing!")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID, 
+        "text": message, 
+        "parse_mode": "Markdown", 
+        "disable_web_page_preview": True
+    }
     requests.post(url, data=payload)
 
 def translate_to_bangla(text):
@@ -31,72 +36,93 @@ def translate_to_bangla(text):
 
 def scrape_doc():
     doc_results = []
-    url = "https://www.doctorofcredit.com/category/bank-account-bonuses/"
+    # Doctor of Credit Bank Bonus RSS Feed
+    url = "https://www.doctorofcredit.com/category/bank-account-bonuses/feed/"
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        posts = soup.find_all('div', class_='post')
+        soup = BeautifulSoup(res.content, 'xml')
+        items = soup.find_all('item')
         
         count = 0
-        for post in posts:
-            title_tag = post.find(['h2', 'h3'])
-            if not title_tag: continue
+        for item in items:
+            title = item.find('title').get_text().strip() if item.find('title') else ""
+            link = item.find('link').get_text().strip() if item.find('link') else ""
+            pub_date = item.find('pubDate').get_text().strip() if item.find('pubDate') else ""
+            description = item.find('description').get_text().strip() if item.find('description') else ""
             
-            title = title_tag.get_text().strip()
-            link_tag = title_tag.find('a')
-            link = link_tag['href'] if link_tag else url
+            combined_text = (title + " " + description).lower()
             
-            # Extract Date
-            date_tag = post.find('time') or post.find('span', class_='date')
-            date_str = date_tag.get_text().strip() if date_tag else "সাম্প্রতিক"
+            # 1. Strict Expiry Filter
+            if any(exp in combined_text for exp in ['expired', 'expired deal', 'expired bonus', '[expired]']):
+                continue
+                
+            # 2. Meta/General Page Title Filter
+            if any(meta in title.lower() for meta in ['best bank account bonuses', 'q1', 'q2', 'q3', 'q4', 'august 2026', 'july 2026']):
+                continue
             
-            if any(k in title.lower() for k in ['no direct deposit', 'no deposit', '$0 deposit', 'easy bonus', 'checking', 'bonus']):
+            # 3. No Deposit / Easy Requirement Filter
+            if any(req in combined_text for req in ['no direct deposit', 'no deposit', '$0 deposit', 'no dd required', 'easy bonus', 'without direct deposit']):
+                clean_date = pub_date[:16] if pub_date else "সাম্প্রতিক"
                 count += 1
+                
                 bn_title = translate_to_bangla(title)
-                bn_date = translate_to_bangla(date_str)
+                bn_date = translate_to_bangla(clean_date)
+                
                 doc_results.append(f"{count}. *{bn_title}*\n📅 তারিখ: {bn_date}\n🔗 [আর্টিকেল লিংক]({link})")
-                if count >= 3: break
+                if count >= 3:
+                    break
     except Exception as e:
-        doc_results.append(f"Doctor of Credit এরর: {e}")
+        doc_results.append(f"Doctor of Credit স্ক্র্যাপ করতে এরর: {e}")
     return doc_results
 
 def scrape_bankbonus():
     bb_results = []
-    url = "https://bankbonus.com/promotions/"
+    url = "https://bankbonus.com/best/bank-promotions-without-direct-deposit/"
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
+        
         headings = soup.find_all(['h2', 'h3'])
         
         count = 0
         for h in headings:
             title = h.get_text().strip()
-            if any(char in title for char in ['$', 'Bonus', 'Checking', 'Savings']):
+            title_lower = title.lower()
+            
+            # 1. Expiry Check
+            if any(exp in title_lower for exp in ['expired', 'ended', 'closed']):
+                continue
+                
+            # 2. Filter specific bank deals (Must have $ amount and ignore generic section titles)
+            if '$' in title and not any(gen in title_lower for gen in ['best bank', 'promotions without', 'bonus offers for', 'best checking']):
                 link_tag = h.find('a')
                 link = link_tag['href'] if link_tag and link_tag.has_attr('href') else url
-                if link.startswith('/'): link = "https://bankbonus.com" + link
+                if link.startswith('/'):
+                    link = "https://bankbonus.com" + link
                 
                 count += 1
                 bn_title = translate_to_bangla(title)
-                bb_results.append(f"{count}. *{bn_title}*\n📅 তারিখ: আপডেট অফার\n🔗 [আর্টিকেল লিংক]({link})")
-                if count >= 3: break
+                
+                bb_results.append(f"{count}. *{bn_title}*\n📅 অফার টাইপ: সক্রিয় (No Direct Deposit)\n🔗 [আর্টিকেল লিংক]({link})")
+                if count >= 3:
+                    break
     except Exception as e:
-        bb_results.append(f"BankBonus এরর: {e}")
+        bb_results.append(f"BankBonus স্ক্র্যাপ করতে এরর: {e}")
     return bb_results
 
 def run_scraper():
     today = datetime.now().strftime("%d %B, %Y")
-    msgs = [f"🔔 *আজকের সর্বশেষ ব্যাংক বোনাস আপডেট* ({today})\n"]
+    msgs = [f"🔔 *আজকের ফিল্টারকৃত লেটেস্ট ব্যাংক বোনাস* ({today})\n"]
     
-    msgs.append("📌 *Doctor of Credit (সর্বশেষ খবর):*")
+    msgs.append("📌 *Doctor of Credit (সক্রিয় ও নতুন আর্টিকেল):*")
     doc_data = scrape_doc()
-    msgs.extend(doc_data if doc_data else ["কোনো নতুন পোস্ট পাওয়া যায়নি।"])
+    msgs.extend(doc_data if doc_data else ["বর্তমানে নতুন কোনো সক্রিয় 'No Deposit' অফারের আর্টিকেল নেই।"])
     
     msgs.append("\n" + "="*30 + "\n")
     
-    msgs.append("📌 *BankBonus.com (সর্বশেষ অফার):*")
+    msgs.append("📌 *BankBonus.com (সক্রিয় প্রমোশনসমূহ):*")
     bb_data = scrape_bankbonus()
-    msgs.extend(bb_data if bb_data else ["কোনো নতুন অফার পাওয়া যায়নি।"])
+    msgs.extend(bb_data if bb_data else ["কোনো নির্দিষ্ট সক্রিয় অফার পাওয়া যায়নি।"])
     
     full_text = "\n\n".join(msgs)
     send_telegram_msg(full_text)
